@@ -1,4 +1,7 @@
+# ================================================================
 # age_detection_ui_final.py
+# Multi-User Login + Sign-Up System + Age Detection Dashboard
+# ================================================================
 import streamlit as st
 import numpy as np
 import io
@@ -11,22 +14,29 @@ from PIL import Image
 from tensorflow.keras.models import load_model
 from datetime import datetime
 import pandas as pd
+import csv
 
 # ================================================================
-# 1️⃣ Load Model
+# 1️⃣ File Paths
+# ================================================================
+BASE_DIR = r"C:\Users\Bommasani peddaraju\OneDrive\Desktop\age_detection"
+USERS_FILE = os.path.join(BASE_DIR, "users.csv")
+MODEL_PATH = os.path.join(BASE_DIR, "age_model.h5")
+
+# ================================================================
+# 2️⃣ Load Model
 # ================================================================
 @st.cache_resource
 def load_age_model():
-    model = load_model("age_model.h5")
+    model = load_model(MODEL_PATH)
     return model
 
 model = load_age_model()
 
 # ================================================================
-# 2️⃣ Utility Functions
+# 3️⃣ Utility Functions
 # ================================================================
 def preprocess_image(image):
-    """Convert image to grayscale, resize, normalize for CNN input."""
     image = np.array(image.convert("L"))
     image = cv2.resize(image, (48, 48))
     image = image / 255.0
@@ -36,23 +46,19 @@ def preprocess_image(image):
 
 @st.cache_data
 def predict_age(image_bytes):
-    """Predict age and 5-year range."""
     img = Image.open(io.BytesIO(image_bytes))
     img_prep = preprocess_image(img)
     pred_age = model.predict(img_prep, verbose=0)
     age = int(np.round(pred_age[0][0]))
-
     lower = max(0, age - 2)
     upper = age + 2
     return age, lower, upper
 
 
 def log_prediction(file_name, predicted_age, age_range):
-    """Save prediction info into CSV (optional)."""
-    log_file = "prediction_history.csv"
+    log_file = os.path.join(BASE_DIR, "prediction_history.csv")
     file_exists = os.path.isfile(log_file)
     with open(log_file, "a", newline="") as f:
-        import csv
         writer = csv.writer(f)
         if not file_exists:
             writer.writerow(["Date/Time", "File Name", "Predicted Age", "Age Range"])
@@ -63,93 +69,98 @@ def log_prediction(file_name, predicted_age, age_range):
             age_range
         ])
 
+# ================================================================
+# 4️⃣ User Management (Sign Up + Login)
+# ================================================================
+def ensure_users_file():
+    """Create users.csv if it doesn't exist."""
+    if not os.path.exists(USERS_FILE):
+        with open(USERS_FILE, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["username", "password", "name"])
+
+def load_users():
+    ensure_users_file()
+    return pd.read_csv(USERS_FILE)
+
+def check_login(username, password, users_df):
+    user = users_df[(users_df["username"] == username) & (users_df["password"] == password)]
+    if not user.empty:
+        return user.iloc[0]["name"]
+    return None
+
+def register_user(name, username, password):
+    ensure_users_file()
+    users_df = pd.read_csv(USERS_FILE)
+    if username in users_df["username"].values:
+        return False  # username already exists
+    with open(USERS_FILE, "a", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([username, password, name])
+    return True
 
 # ================================================================
-# 3️⃣ Streamlit UI
+# 5️⃣ Age Detection UI
 # ================================================================
-st.set_page_config(page_title="Age Detection", page_icon="🧠", layout="centered")
-st.title("🧠 Age Detection using CNN")
-st.write("Upload a photo or use your webcam to detect **age** using a CNN model.")
+def age_detection_ui(user_name):
+    st.sidebar.success(f"Logged in as: {user_name}")
+    st.title("🧠 Age Detection using CNN")
+    st.write("Upload a photo or use your webcam to detect **age** using a CNN model.")
 
-option = st.radio("Choose Input Mode:", ["📁 Upload Image", "📸 Use Camera"])
+    option = st.radio("Choose Input Mode:", ["📁 Upload Image", "📸 Use Camera"])
 
-if option == "📁 Upload Image":
-    uploaded_file = st.file_uploader("Upload an image...", type=["jpg", "jpeg", "png"])
-    if uploaded_file is not None:
-        image_bytes = uploaded_file.read()
-        image = Image.open(io.BytesIO(image_bytes))
-        st.image(image, caption="Uploaded Image", use_container_width=True)
+    if option == "📁 Upload Image":
+        uploaded_file = st.file_uploader("Upload an image...", type=["jpg", "jpeg", "png"])
+        if uploaded_file is not None:
+            image_bytes = uploaded_file.read()
+            image = Image.open(io.BytesIO(image_bytes))
+            st.image(image, caption="Uploaded Image", use_container_width=True)
 
-        with st.spinner("Predicting..."):
-            age, lower, upper = predict_age(image_bytes)
+            with st.spinner("Predicting..."):
+                age, lower, upper = predict_age(image_bytes)
 
-        st.success("✅ Prediction Complete!")
-        st.write(f"**Predicted Age Range:** {lower} - {upper} years")
+            st.success("✅ Prediction Complete!")
+            st.write(f"**Predicted Age Range:** {lower} - {upper} years")
+            log_prediction(uploaded_file.name, age, f"{lower}-{upper}")
 
-        # Save log entry
-        log_prediction(uploaded_file.name, age, f"{lower}-{upper}")
+    elif option == "📸 Use Camera":
+        camera_image = st.camera_input("Take a picture")
+        if camera_image is not None:
+            image_bytes = camera_image.getvalue()
+            image = Image.open(io.BytesIO(image_bytes))
+            st.image(image, caption="Captured Image", use_container_width=True)
 
-elif option == "📸 Use Camera":
-    camera_image = st.camera_input("Take a picture")
-    if camera_image is not None:
-        image_bytes = camera_image.getvalue()
-        image = Image.open(io.BytesIO(image_bytes))
-        st.image(image, caption="Captured Image", use_container_width=True)
+            with st.spinner("Predicting..."):
+                age, lower, upper = predict_age(image_bytes)
 
-        with st.spinner("Predicting..."):
-            age, lower, upper = predict_age(image_bytes)
-
-        st.success("✅ Prediction Complete!")
-        st.write(f"**Predicted Age Range:** {lower} - {upper} years")
-
-        # Save log entry
-        log_prediction("camera_image.jpg", age, f"{lower}-{upper}")
-
+            st.success("✅ Prediction Complete!")
+            st.write(f"**Predicted Age Range:** {lower} - {upper} years")
+            log_prediction("camera_image.jpg", age, f"{lower}-{upper}")
 
 # ================================================================
-# 4️⃣ Admin Dashboard (Module 6)
+# 6️⃣ Admin Dashboard
 # ================================================================
 def admin_dashboard():
-    """
-    Admin Dashboard – Simplified version without login.
-    Shows system performance, TensorFlow info, and log access.
-    """
     st.title("🧠 System Dashboard (Admin Panel)")
     st.write("Monitor performance, manage upload limits, and access history.")
 
-    # --- System Information ---
     st.subheader("🖥️ System Information")
     st.text(f"OS: {platform.system()} {platform.release()}")
     st.text(f"Processor: {platform.processor()}")
     st.text(f"TensorFlow version: {tf.__version__}")
 
-    # --- Resource Monitoring ---
     st.subheader("📊 System Performance")
     memory = psutil.virtual_memory()
     cpu_usage = psutil.cpu_percent(interval=1)
-    st.progress(cpu_usage / 100)  # fixed range issue
+    st.progress(cpu_usage / 100)
     st.text(f"CPU Usage: {cpu_usage}%")
     st.text(
         f"Available Memory: {round(memory.available / (1024**3), 2)} GB / "
         f"Total: {round(memory.total / (1024**3), 2)} GB"
     )
 
-    # --- Model Info ---
-    st.subheader("🧩 Model Information")
-    try:
-        total_params = model.count_params()
-        st.text(f"Total Trainable Parameters: {total_params:,}")
-    except Exception as e:
-        st.warning(f"Unable to load model details: {e}")
-
-    # --- Upload Size Control ---
-    st.subheader("⚙️ Upload Controls")
-    max_upload_size = st.slider("Maximum upload size (MB):", 1, 20, 5)
-    st.write(f"✅ Max upload size set to: {max_upload_size} MB")
-
-    # --- History File ---
     st.subheader("🧾 Prediction History")
-    log_file = "prediction_history.csv"
+    log_file = os.path.join(BASE_DIR, "prediction_history.csv")
     if os.path.exists(log_file):
         df = pd.read_csv(log_file)
         st.dataframe(df, use_container_width=True)
@@ -165,13 +176,66 @@ def admin_dashboard():
     else:
         st.info("No prediction history available yet.")
 
-
 # ================================================================
-# 5️⃣ Footer and Admin Access
+# 7️⃣ Main App Logic
 # ================================================================
-st.markdown("---")
-if st.checkbox("🧠 Open Admin Dashboard"):
-    admin_dashboard()
+def main():
+    st.set_page_config(page_title="Age Detection Dashboard", page_icon="🧠", layout="centered")
+    ensure_users_file()
+    users_df = load_users()
 
-st.markdown("---")
-st.markdown("👨‍💻 Developed by *Bommasani Peddaraju & Sreedhar* | Mini Project 2025")
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+        st.session_state.user_name = ""
+
+    if not st.session_state.logged_in:
+        mode = st.radio("Select Mode:", ["🔐 Login", "🆕 Sign Up"])
+
+        if mode == "🔐 Login":
+            st.title("Login to Dashboard")
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+
+            if st.button("Login"):
+                name = check_login(username, password, users_df)
+                if name:
+                    st.session_state.logged_in = True
+                    st.session_state.user_name = name
+                    st.success(f"Welcome, {name}!")
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid username or password")
+
+        elif mode == "🆕 Sign Up":
+            st.title("Create New Account")
+            name = st.text_input("Full Name")
+            username = st.text_input("Choose Username")
+            password = st.text_input("Choose Password", type="password")
+
+            if st.button("Register"):
+                if name and username and password:
+                    success = register_user(name, username, password)
+                    if success:
+                        st.success("✅ Account created successfully! You can now log in.")
+                    else:
+                        st.warning("⚠️ Username already exists. Please choose another.")
+                else:
+                    st.error("❌ All fields are required.")
+    else:
+        age_detection_ui(st.session_state.user_name)
+        st.markdown("---")
+        if st.checkbox("🧠 Open Admin Dashboard"):
+            admin_dashboard()
+
+        st.sidebar.button("Logout", on_click=lambda: logout())
+
+        st.markdown("---")
+        st.markdown("👨‍💻 Developed by *Bommasani Peddaraju & Sreedhar* | Mini Project 2025")
+
+def logout():
+    st.session_state.logged_in = False
+    st.session_state.user_name = ""
+    st.rerun()
+
+if __name__ == "__main__":
+    main()
